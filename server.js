@@ -1,96 +1,88 @@
+
 require("dotenv").config();
-const TelegramBot = require("node-telegram-bot-api");
+const { Telegraf } = require("telegraf");
 const connectToDB = require("./database/db");
 const Admin = require("./models/Admin");
 const Message = require("./models/Message");
 
-
-const token = process.env.TOKEN;
-const bot = new TelegramBot(process.env.BOT_TOKEN, {
-    polling: true
-});
+const bot = new Telegraf(process.env.BOT_TOKEN);
 
 connectToDB();
 
 const BATCH_SIZE = 10;
-
 let currentAdminIndex = 0;
 
-bot.on("message", async (msg) => {
-    const chatId = msg.chat.id;
+bot.start((ctx) => {
+  ctx.reply("👋 Welcome to *Kavana Support Bot*!\n\nHow can we help you today?", {
+    parse_mode: "Markdown",
+  });
+});
 
-    const isAdmin = await Admin.findOne({ chatId });
+bot.command("addadmin", async (ctx) => {
+  const parts = ctx.message.text.split(" ");
+  if (parts.length < 2) {
+    return ctx.reply("Usage: /addadmin <chatId>");
+  }
+  const newAdminId = Number(parts[1]);
+  await Admin.create({ chatId: newAdminId });
+  ctx.reply(`✅ Admin ${newAdminId} added`);
+});
 
-    if (isAdmin) {
-
-        const TelegramBot = require("node-telegram-bot-api");
-
-        const token = "YOUR_BOT_TOKEN";
-        const bot = new TelegramBot(token, { polling: true });
-
-        bot.onText(/\/start/, (msg) => {
-            const chatId = msg.chat.id;
-            bot.sendMessage(chatId, "👋 Welcome to *Kavana Support Bot*!\n\nHow can we help you today?", {
-                parse_mode: "Markdown"
-            });
-        });
-
-        bot.on("message", (msg) => {
-            const chatId = msg.chat.id;
-
-            if (msg.text.startsWith("/start")) return;
-
-            bot.sendMessage(chatId, "✅ Thank you for your message.\nOur team will contact you as soon as possible.");
-        });
-
-        if (msg.text.startsWith("/addadmin")) {
-            const parts = msg.text.split(" ");
-            if (parts.length < 2) {
-                return bot.sendMessage(chatId, "Usage: /addadmin <chatId>");
-            }
-            const newAdminId = Number(parts[1]);
-            await Admin.create({ chatId: newAdminId });
-            return bot.sendMessage(chatId, `✅ Admin ${newAdminId} added`);
-        }
-
-        if (msg.text.startsWith("/reply")) {
-            const parts = msg.text.split(" ");
-            const userId = Number(parts[1]);
-            const replyMsg = parts.slice(2).join(" ");
-            bot.sendMessage(userId, `💬 Support: ${replyMsg}`);
-            return bot.sendMessage(chatId, "✅ Reply sent!");
-        }
-
-        return;
-    }
-
-
-    await Message.create({
-        userId: chatId,
-        username: msg.from.username || msg.from.first_name,
-        text: msg.text
-    });
-
-    const totalMessages = await Message.countDocuments();
-
-    if (totalMessages >= BATCH_SIZE) {
-        const batch = await Message.find().sort({ createdAt: 1 }).limit(BATCH_SIZE);
-        const allAdmins = await Admin.find();
-
-        if (allAdmins.length === 0) return;
-
-        const targetAdmin = allAdmins[currentAdminIndex];
-        let batchText = batch
-            .map((m, i) => `${i + 1}. [${m.username}] ${m.text} (id:${m.userId})`)
-            .join("\n");
-
-        await bot.sendMessage(targetAdmin.chatId, `📩 New Support Batch:\n\n${batchText}`);
-
-        const ids = batch.map((m) => m._id);
-        await Message.deleteMany({ _id: { $in: ids } });
-
-        currentAdminIndex = (currentAdminIndex + 1) % allAdmins.length;
-    }
+bot.command("reply", async (ctx) => {
+  const parts = ctx.message.text.split(" ");
+  if (parts.length < 3) {
+    return ctx.reply("Usage: /reply <userId> <message>");
+  }
+  const userId = Number(parts[1]);
+  const replyMsg = parts.slice(2).join(" ");
+  await ctx.telegram.sendMessage(userId, `💬 Support: ${replyMsg}`);
+  ctx.reply("✅ Reply sent!");
 });
 
 
+bot.on("text", async (ctx) => {
+  const chatId = ctx.chat.id;
+  const text = ctx.message.text;
+
+  
+  if (text.startsWith("/")) return;
+
+ 
+  const isAdmin = await Admin.findOne({ chatId });
+  if (isAdmin) {
+    return ctx.reply("⚠️ You are an admin. Use commands like /reply or /addadmin.");
+  }
+
+  
+  await Message.create({
+    userId: chatId,
+    username: ctx.from.username || ctx.from.first_name,
+    text,
+  });
+
+ 
+  await ctx.reply("✅ Thank you for your message.\nOur team will contact you as soon as possible.");
+
+
+  const totalMessages = await Message.countDocuments();
+  if (totalMessages >= BATCH_SIZE) {
+    const batch = await Message.find().sort({ createdAt: 1 }).limit(BATCH_SIZE);
+    const allAdmins = await Admin.find();
+    if (allAdmins.length === 0) return;
+
+    const targetAdmin = allAdmins[currentAdminIndex];
+    let batchText = batch
+      .map((m, i) => `${i + 1}. [${m.username}] ${m.text} (id:${m.userId})`)
+      .join("\n");
+
+    await ctx.telegram.sendMessage(targetAdmin.chatId, `📩 New Support Batch:\n\n${batchText}`);
+
+    const ids = batch.map((m) => m._id);
+    await Message.deleteMany({ _id: { $in: ids } });
+
+    currentAdminIndex = (currentAdminIndex + 1) % allAdmins.length;
+  }
+});
+
+bot.launch();
+console.log("🤖 Bot started...");
