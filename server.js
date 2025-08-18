@@ -6,7 +6,7 @@ const Message = require("./models/Message");
 
 
 const token = process.env.TOKEN;
-const bot = new TelegramBot(process.env.TOKEN, {
+const bot = new TelegramBot(process.env.BOT_TOKEN, {
     polling: true
 });
 
