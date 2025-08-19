@@ -26,6 +26,10 @@ bot.start((ctx) => {
     "👋 Welcome to *Kavana Support Bot*!\n\nHow can we help you today?",
     { parse_mode: "Markdown" }
   );
+
+  ctx.reply(
+    "💡 For general instructions, type /help anytime."
+  );
 });
 
 bot.command("addadmin", async (ctx) => {
