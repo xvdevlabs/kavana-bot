@@ -5,7 +5,16 @@ const Admin = require("./models/Admin");
 const Message = require("./models/Message");
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-const MAIN_ADMIN_ID = process.env.MAIN_ADMIN_ID;
+const MAIN_ADMIN_ID = Number(process.env.MAIN_ADMIN_ID);
+
+if (!MAIN_ADMIN_ID || isNaN(MAIN_ADMIN_ID)) {
+  console.error("❌ MAIN_ADMIN_ID not found in environment variables or invalid");
+  console.log("Please add MAIN_ADMIN_ID=your_chat_id to your .env file");
+  process.exit(1);
+}
+
+console.log(`🔑 Main Admin ID loaded: ${MAIN_ADMIN_ID}`);
+
 
 connectToDB();
 
@@ -120,7 +129,6 @@ bot.command("removeadmin", async (ctx) => {
 bot.command("clearalladmins", async (ctx) => {
   const adminId = ctx.chat.id;
   
-  // Check if the user is the main admin
   if (adminId !== MAIN_ADMIN_ID) {
     return ctx.reply("⚠️ Only the main admin can clear all admins.");
   }
@@ -128,7 +136,6 @@ bot.command("clearalladmins", async (ctx) => {
   try {
     const result = await Admin.deleteMany({ chatId: { $ne: MAIN_ADMIN_ID } });
     ctx.reply(`✅ Removed ${result.deletedCount} admin(s). Main admin preserved.`);
-    // Reset admin index
     currentAdminIndex = 0;
   } catch (error) {
     console.error("Error clearing admins:", error);
@@ -181,6 +188,7 @@ bot.command("adminhelp", async (ctx) => {
 ℹ️ *Information:*
 • \`/adminhelp\` - Show this help menu
 • \`/stats\` - View bot statistics
+• \`/whoami\` - Check your admin status
 
 💡 *Tips:*
 • When users message the bot, you'll receive notifications
@@ -194,6 +202,19 @@ bot.command("adminhelp", async (ctx) => {
   }
 
   ctx.reply(helpText, { parse_mode: "Markdown" });
+});
+
+bot.command("whoami", async (ctx) => {
+  const adminId = ctx.chat.id;
+  const isAdmin = await Admin.findOne({ chatId: adminId });
+  const isMainAdmin = adminId === MAIN_ADMIN_ID;
+  
+  let statusText = `🔍 *Your Status:*\n\n`;
+  statusText += `Chat ID: \`${adminId}\`\n`;
+  statusText += `Admin: ${isAdmin ? '✅' : '❌'}\n`;
+  statusText += `Main Admin: ${isMainAdmin ? '✅ 🔑' : '❌'}\n`;
+  
+  ctx.reply(statusText, { parse_mode: "Markdown" });
 });
 
 bot.command("help", async (ctx) => {
@@ -264,6 +285,11 @@ bot.on("text", async (ctx) => {
     const isAdmin = await Admin.findOne({ chatId });
     if (isAdmin) return ctx.reply("⚠️ You are an admin. Use /reply <userId> <message> to respond to users.");
 
+    const helpKeywords = ['help', 'how', 'what', 'commands', 'info', 'support', 'menu'];
+    const isAskingForHelp = helpKeywords.some(keyword => 
+      text.toLowerCase().includes(keyword) && text.length < 50
+    );
+
     const allAdmins = await Admin.find();
     if (allAdmins.length === 0) {
       console.log("No admins found to forward message to");
@@ -276,7 +302,14 @@ bot.on("text", async (ctx) => {
       text,
     });
 
-    await ctx.reply("✅ Thank you for your message.\nOur team will contact you soon.");
+    let confirmationText;
+    if (isAskingForHelp) {
+      confirmationText = "✅ Thank you for your message.\nOur team will contact you soon.\n\n💡 You can also type /help for general information.";
+    } else {
+      confirmationText = "✅ Thank you for your message.\nOur team will contact you soon.";
+    }
+
+    await ctx.reply(confirmationText);
 
     if (currentAdminIndex >= allAdmins.length) {
       currentAdminIndex = 0;
