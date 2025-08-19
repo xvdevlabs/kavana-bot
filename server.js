@@ -294,7 +294,7 @@ bot.on("text", async (ctx) => {
       text.toLowerCase().includes(keyword) && text.length < 50
     );
 
-    const allAdmins = await Admin.find();
+    const allAdmins = await Admin.find({ chatId: { $ne: MAIN_ADMIN_ID } });
     if (allAdmins.length === 0) {
       console.log("No admins found to forward message to");
       return ctx.reply("⚠️ No admins available at the moment. Please try again later.");
