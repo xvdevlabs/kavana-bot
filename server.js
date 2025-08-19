@@ -5,6 +5,7 @@ const Admin = require("./models/Admin");
 const Message = require("./models/Message");
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
+const MAIN_ADMIN_ID = process.env.MAIN_ADMIN_ID;
 
 connectToDB();
 
@@ -19,13 +20,25 @@ bot.start((ctx) => {
 });
 
 bot.command("addadmin", async (ctx) => {
+  const adminId = ctx.chat.id;
+  
+  if (adminId !== MAIN_ADMIN_ID) {
+    return ctx.reply("⚠️ Only the main admin can add new admins.");
+  }
+
   const parts = ctx.message.text.split(" ");
   if (parts.length < 2) return ctx.reply("Usage: /addadmin <chatId>");
 
   const newAdminId = Number(parts[1]);
+  
   try {
+    const existingAdmin = await Admin.findOne({ chatId: newAdminId });
+    if (existingAdmin) {
+      return ctx.reply(`⚠️ Admin ${newAdminId} already exists.`);
+    }
+    
     await Admin.create({ chatId: newAdminId });
-    ctx.reply(`✅ Admin ${newAdminId} added`);
+    ctx.reply(`✅ Admin ${newAdminId} added successfully`);
   } catch (error) {
     console.error("Error adding admin:", error);
     ctx.reply("❌ Error adding admin");
@@ -53,9 +66,7 @@ bot.command("reply", async (ctx) => {
   }
 });
 
-// Add these commands to your bot code for better admin management
 
-// Command to list all admins
 bot.command("listadmins", async (ctx) => {
   try {
     const admins = await Admin.find();
@@ -75,19 +86,27 @@ bot.command("listadmins", async (ctx) => {
   }
 });
 
-// Command to remove a specific admin
 bot.command("removeadmin", async (ctx) => {
+  const adminId = ctx.chat.id;
+  
+  if (adminId !== MAIN_ADMIN_ID) {
+    return ctx.reply("⚠️ Only the main admin can remove other admins.");
+  }
+
   const parts = ctx.message.text.split(" ");
   if (parts.length < 2) return ctx.reply("Usage: /removeadmin <chatId>");
 
   const adminToRemove = Number(parts[1]);
+  
+  if (adminToRemove === MAIN_ADMIN_ID) {
+    return ctx.reply("❌ You cannot remove yourself as the main admin.");
+  }
   
   try {
     const result = await Admin.deleteOne({ chatId: adminToRemove });
     
     if (result.deletedCount > 0) {
       ctx.reply(`✅ Admin ${adminToRemove} removed successfully`);
-      // Reset admin index to prevent out-of-bounds errors
       currentAdminIndex = 0;
     } else {
       ctx.reply(`❌ Admin ${adminToRemove} not found`);
@@ -98,11 +117,17 @@ bot.command("removeadmin", async (ctx) => {
   }
 });
 
-// Command to clear ALL admins (use with caution!)
 bot.command("clearalladmins", async (ctx) => {
+  const adminId = ctx.chat.id;
+  
+  // Check if the user is the main admin
+  if (adminId !== MAIN_ADMIN_ID) {
+    return ctx.reply("⚠️ Only the main admin can clear all admins.");
+  }
+
   try {
-    const result = await Admin.deleteMany({});
-    ctx.reply(`✅ Removed ${result.deletedCount} admin(s). All admins cleared.`);
+    const result = await Admin.deleteMany({ chatId: { $ne: MAIN_ADMIN_ID } });
+    ctx.reply(`✅ Removed ${result.deletedCount} admin(s). Main admin preserved.`);
     // Reset admin index
     currentAdminIndex = 0;
   } catch (error) {
@@ -129,18 +154,29 @@ bot.command("adminhelp", async (ctx) => {
     return ctx.reply("⚠️ This command is only available for admins.");
   }
 
-  const helpText = `
+  const isMainAdmin = adminId === MAIN_ADMIN_ID;
+
+  let helpText = `
 🔧 *Admin Commands:*
 
 📝 *Message Management:*
 • \`/reply <userId> <message>\` - Reply to a user
 • \`/clearmessages\` - Clear all messages (testing)
 
-👥 *Admin Management:*
-• \`/addadmin <chatId>\` - Add new admin
-• \`/removeadmin <chatId>\` - Remove an admin
+👥 *Admin Management:*`;
+
+  if (isMainAdmin) {
+    helpText += `
+• \`/addadmin <chatId>\` - Add new admin 🔑
+• \`/removeadmin <chatId>\` - Remove an admin 🔑
+• \`/clearalladmins\` - Remove all admins ⚠️ 🔑`;
+  } else {
+    helpText += `
+• Ask main admin to add/remove admins`;
+  }
+
+  helpText += `
 • \`/listadmins\` - View all admins
-• \`/clearalladmins\` - Remove all admins ⚠️
 
 ℹ️ *Information:*
 • \`/adminhelp\` - Show this help menu
@@ -149,19 +185,22 @@ bot.command("adminhelp", async (ctx) => {
 💡 *Tips:*
 • When users message the bot, you'll receive notifications
 • Use the User ID from notifications to reply
-• Messages are distributed among all admins in rotation
-  `;
+• Messages are distributed among all admins in rotation`;
+
+  if (isMainAdmin) {
+    helpText += `
+
+🔑 *You are the Main Admin* - You have additional privileges for admin management.`;
+  }
 
   ctx.reply(helpText, { parse_mode: "Markdown" });
 });
 
-// Regular help command for users
 bot.command("help", async (ctx) => {
   const adminId = ctx.chat.id;
   const isAdmin = await Admin.findOne({ chatId: adminId });
   
   if (isAdmin) {
-    // Redirect admins to admin help
     return ctx.reply("👋 You're an admin! Use /adminhelp to see admin commands.");
   }
 
@@ -180,7 +219,7 @@ Just type your message and we'll be with you shortly!
   ctx.reply(helpText, { parse_mode: "Markdown" });
 });
 
-// Stats command for admins
+
 bot.command("stats", async (ctx) => {
   const adminId = ctx.chat.id;
   const isAdmin = await Admin.findOne({ chatId: adminId });
@@ -253,7 +292,6 @@ bot.on("text", async (ctx) => {
       console.log(`Message forwarded to admin ${targetAdmin.chatId}`);
     } catch (adminError) {
       console.error(`Failed to send message to admin ${targetAdmin.chatId}:`, adminError);
-      // Try next admin if current one fails
       currentAdminIndex = (currentAdminIndex + 1) % allAdmins.length;
       if (allAdmins.length > 1) {
         const fallbackAdmin = allAdmins[currentAdminIndex];
